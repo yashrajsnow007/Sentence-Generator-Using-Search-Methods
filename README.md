@@ -40,32 +40,6 @@ L= {3,5,10,15}
 run_experiments(vocab_file, transition_file, n_values)
 
 
-## Results
-
-The results of the experiments will be printed to the console, showing the generated sentence, score, nodes explored, and execution time for each algorithm.
-
-Example output:
-Running experiments for n=4
-
-Results using IDDFS:
-Sentence (length 6): <SoS> grass grass airport green <EoS>
-Score: 0.0013628499234583315, Nodes Explored: 1049, Time: 0.0000 sec
-
-
-Results using UCS:
-Sentence (length 6): <SoS> grass grass airport green <EoS>
-Score: 0.0013628499234583315, Nodes Explored: 128, Time: 0.0000 sec
-
-
-Results using Greedy Search:
-Sentence (length 6): <SoS> green airport at grass <EoS>
-Score: 0.00042083261917621675, Nodes Explored: 5, Time: 0.0000 sec
-
-
-Results using A* Search:
-Sentence (length 6): <SoS> grass grass airport green <EoS>
-Score: 0.0013628499234583315, Nodes Explored: 64, Time: 0.0000 sec
-
 
 ## License
 
