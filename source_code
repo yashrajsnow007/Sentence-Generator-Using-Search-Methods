@@ -1,0 +1,334 @@
+import time
+import numpy as np
+from typing import List, Tuple
+import heapq
+import sys
+
+class SentenceGenerator:
+
+    def __init__(self, vocab_file, transition_file):
+        self.vocabulary = self.loadVocabulary(vocab_file)
+        self.transitMat = self.loadMatrix(transition_file)
+        self.L = len(self.vocabulary)
+        self.normalizeMatrix()
+
+
+    def loadVocabulary(self, file_currSeq):
+        with open(file_currSeq, 'r') as f:
+            return [line.strip() for line in f]
+
+    def loadMatrix(self, file_currSeq):
+        return np.loadtxt(file_currSeq)
+
+    def normalizeMatrix(self):
+        self.transitMat = self.normalize_TM(self.transitMat)
+        #print("Transition Matrix after normalization:", self.transitMat)
+
+    def normalize_TM(self,TM):
+
+        TM = np.array(TM)
+        
+        num_rows, num_cols = TM.shape
+
+        # Iterate from 0 to column - 1
+        for i in range(num_cols):
+            row_sum = np.sum(TM[i, :]) + TM[-1, i]
+            if row_sum > 0:
+                TM[i, :] = TM[i, :] / row_sum
+            TM[-1, i] = TM[-1, i] / row_sum
+
+        # the 2nd last row
+        last_2 = np.sum(TM[-2])
+        if last_2 > 0:
+            TM[-2] = TM[-2]/ last_2
+
+        return TM
+
+    # helper function to calculate transition probability from word1 to word2.
+    def transitScore(self, word1, word2):
+        
+        if word1 == '<SoS>':
+            return self.transitMat[self.L, self.vocabulary.index(word2)]
+        elif word2 == '<EoS>':
+            return self.transitMat[self.L + 1, self.vocabulary.index(word1)]
+        else:
+            return self.transitMat[self.vocabulary.index(word1), self.vocabulary.index(word2)]
+
+
+    # Calculate the score of a passed sentence.
+    def sentenceScore(self, sentence) -> float:
+        score = 1.0  # Initialized score to 1.0
+        for i in range(1, len(sentence)):
+            score *= self.transitScore(sentence[i - 1], sentence[i])
+        return score
+
+    # Iterative Deepening d-First Search (IDDFS) usinf dfs function recursively
+    def iddfs(self, n):
+    
+        nodesEx = 0  # for initializing the nodes explored    
+        bestSeq, bestScore = [], 0  # Track the best sentence and its score
+
+        # Recursive DFS function with d limit
+        def dfs(currSeq, d, currScore):
+            nonlocal nodesEx, bestSeq, bestScore
+            nodesEx += 1
+
+            # Base case: if sentence is complete (length n + 2), check if it's the best
+            if len(currSeq) == n + 2:
+                if currScore > bestScore:
+                    bestSeq = currSeq[:]
+                    bestScore = currScore
+                return currSeq, currScore
+
+            # Stop at d limit
+            if d == 0:
+                return [], 0
+
+            if(len(currSeq) < n + 1):
+                remWords = self.vocabulary  # remaing words in the vocabulary
+
+            else:
+                remWords = ['<EoS>']  # if the sentence is complete, add <EoS> to the remaining words
+
+            for w in remWords:
+                # Calculate new score by multiplying current score with the transition score
+                newScore = currScore * self.transitScore(currSeq[-1], w)
+                upadated_currSeq = currSeq + [w]
+                dfs(upadated_currSeq, d - 1, newScore)
+
+            return bestSeq, bestScore
+
+        # IDDFS loop to iteratively deepen the search
+        for d in range(1, n + 2):
+            dfs(['<SoS>'], d, 1.0)  # Start with the initial score of 1.0
+
+        return bestSeq, bestScore, nodesEx
+
+
+    #Uniform Cost Search (UCS) 
+    def ucs(self, n):
+        
+        start = ['<SoS>']
+        pq = [(0, start)]  # (negative score, currSeq) priority queue
+        bestSeq, bestScore = [], -float('inf')
+        nodesEx = 0
+        visited = set()
+
+        while pq:
+            
+            currScore, currSeq = heapq.heappop(pq)
+            currScore = -currScore  # Convert back to positive score
+
+            # If goal length is reached, update the best score if necessary
+            if len(currSeq) == n+2:
+                nodesEx += 1/2
+                if currScore > bestScore:
+                    bestScore = currScore
+                    bestSeq = currSeq
+                continue
+
+            end = currSeq[-1] # ending/ last word of the current sequence
+
+            if(len(currSeq) < n + 1):
+                remWords = self.vocabulary  # remaing words in the vocabulary
+            else:
+                remWords = ['<EoS>'] 
+
+            for w in remWords:
+                upadated_currSeq = currSeq + [w]
+                if tuple(upadated_currSeq) not in visited:
+                    visited.add(tuple(upadated_currSeq))
+                    updatedScore = self.sentenceScore(upadated_currSeq)
+                    heapq.heappush(pq, (-updatedScore, upadated_currSeq))
+
+        return bestSeq, bestScore, round(nodesEx)
+
+    # Greedy Search
+    def greedy_search(self, n):
+
+        start = ['<SoS>']
+        bestSeq = []
+        bestScore = -float('inf')
+        nodesEx = 0
+
+        currSeq = start
+        while len(currSeq) < n+2:
+            nodesEx += 1
+            end = currSeq[-1]
+            if(len(currSeq) < n + 1):
+                remWords = self.vocabulary  # remaing words in the vocabulary
+
+            else:
+                remWords = ['<EoS>'] 
+
+            nextWord = None  # Next word to be added to the sequence
+            nextScore = -float('inf')
+
+            for w in remWords:
+                s = self.transitScore(end, w)
+                if s > nextScore:
+                    nextWord = w
+                    nextScore = s
+
+            if nextWord is not None:
+                currSeq.append(nextWord)
+            else:
+                break
+
+        if len(currSeq) == n+2:
+            bestSeq = currSeq
+            bestScore = self.sentenceScore(bestSeq)
+
+        return bestSeq, bestScore, nodesEx
+    
+
+    def heuristic(self, r, P, endIdx, L):
+        if endIdx == -1:
+            maxProbabibilty = np.max(P[:, -1])  # Max transition probability to <EoS>
+        else:
+            maxProbabibilty = 0.0
+            # Find the maximum transition probability from the current word to any word or <EOS>
+            for next in range(L):
+                maxProbabibilty = max(maxProbabibilty, P[endIdx, next])
+            maxProbabibilty = max(maxProbabibilty, P[L + 1, endIdx])  # Transition to <EOS>
+        
+        return maxProbabibilty ** r
+
+    def a_star(self, n):
+        start = ['<SoS>']
+        PQ = [(0, start)]  # (f = g + h, currSeq) priority queue
+        bestSeq, bestScore = [], -float('inf')
+        nodesEx = 0
+        visited = set()
+        currScore = 0
+
+        while PQ:
+            
+            f, currSeq = heapq.heappop(PQ)
+            if len(currSeq) == n+2:
+                nodesEx += 1/4
+                if currScore > bestScore:
+                    bestScore = currScore
+                    bestSeq = currSeq
+                continue
+
+            end = currSeq[-1]
+            if end in self.vocabulary:
+                endIdx = self.vocabulary.index(end)
+            else:
+                endIdx = -1  # Special cases for <SoS> and <EoS>
+
+            if(len(currSeq) < n + 1):
+                remWords = self.vocabulary  # remaing words in the vocabulary
+
+            else:
+                remWords = ['<EoS>'] 
+
+            for word in remWords:
+                upadated_currSeq = currSeq + [word]
+                if tuple(upadated_currSeq) not in visited:
+                    visited.add(tuple(upadated_currSeq))
+                    g = self.sentenceScore(upadated_currSeq)  # Actual cost (UCS component)
+                    currScore = g
+                    rem = n+2 - len(upadated_currSeq)
+                    h = self.heuristic(rem, self.transitMat, endIdx, self.L)  # Heuristic (future estimate)
+                    f = -(g + h)  # Adjusted for heuristic (minimize f = g * h in the priority queue)
+                    heapq.heappush(PQ, (f, upadated_currSeq))
+  
+
+        return bestSeq, bestScore, round(nodesEx)
+
+
+# Helper function for running differnent algorithms for diffrent n
+def run_search_algorithm(algorithm_name, generator, n):
+
+    start = time.time()
+    if algorithm_name == "iddfs":
+        sentence, score, nodes = generator.iddfs(n)
+    elif algorithm_name == "ucs":
+        sentence, score, nodes = generator.ucs(n)
+    elif algorithm_name == "greedy":
+        sentence, score, nodes = generator.greedy_search(n)
+    elif algorithm_name == "astar":
+        sentence, score, nodes = generator.a_star(n)
+    else:
+        print(f"Value error : Unknown algorithm: {algorithm_name}")
+        
+    end = time.time() - start
+    return (n, nodes, sentence, score, end)
+
+# Helper function to print results
+def print_results(algorithm_name, results):
+
+    print(f"\nResults using {algorithm_name}:")
+    for n, nodes, sentence, score, exec_time in results:
+        print(f"Sentence (length {n+2}): {' '.join(sentence)}")
+        print(f"Score: {score}, Nodes Explored: {nodes}, Time: {exec_time:.4f} sec\n")
+
+# Run experiments for IDDFS, UCS, Greedy search, and A*.
+def run_experiments(vocab_file, transition_file, n_values):
+    
+    results_iddfs = []
+    results_ucs = []
+    results_greedy = []
+    results_astar = []
+
+    for n in n_values:
+        print(f"Running experiments for n={n}")
+        generator = SentenceGenerator(vocab_file, transition_file)
+
+        # IDDFS
+        results_iddfs.append(run_search_algorithm("iddfs", generator, n))
+
+        # UCS
+        results_ucs.append(run_search_algorithm("ucs", generator, n))
+
+        # Greedy Search
+        results_greedy.append(run_search_algorithm("greedy", generator, n))
+
+        # A* Search
+        results_astar.append(run_search_algorithm("astar", generator, n))
+
+    # Print results
+    print_results("IDDFS", results_iddfs)
+    print_results("UCS", results_ucs)
+    print_results("Greedy Search", results_greedy)
+    print_results("A* Search", results_astar)
+
+
+
+if __name__ == "__main__":
+
+    if len(sys.argv) != 5:
+        print("CLI Usage: python final_pro.py <L> <n+2> <transition_file> <vocab_file>")
+        sys.exit(1)
+
+    L = int(sys.argv[1])
+    n = int(sys.argv[2])
+    transition_file = sys.argv[3]
+    vocab_file = sys.argv[4]
+
+    n_values = {n-2}
+
+    run_experiments(vocab_file, transition_file, n_values)
+
+    print("----------------------------------------------------------")
+    print("----------------------------------------------------------")
+    print("\n")
+    print("Now the results for diffrent values of n [ 3, 4, 5, 6,7,8]")
+    n_values = [3, 4, 5, 6, 7, 8]  # Example values for n
+
+    run_experiments(vocab_file, transition_file, n_values)
+    
+    '''For analyzing the results for different values of L, uncomment the following code(also the files voacb_3 , transition_3 and so on should be present in the directory)'''
+    # L_values = [3, 5, 10, 15]
+    # n_values = [3, 4, 5, 6]  # Values for n
+
+    # for L in L_values:
+
+    #     vocab_file = f'vocab_{L}.txt'
+    #     transition_file = f'transition_{L}.txt'
+                
+    #     run_experiments(vocab_file, transition_file, n_values)
+
+    # print("All experiments completed.")
